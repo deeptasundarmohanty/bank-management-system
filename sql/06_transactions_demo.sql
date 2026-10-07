@@ -1,32 +1,100 @@
--- ============================================================
--- Transaction Management demo | Unit 5
--- ============================================================
--- Atomicity: all or nothing
-SET TRANSACTION NAME 'xfer_demo';
-UPDATE Account SET balance = balance - 1000 WHERE account_no = 10001;
+USE banking_db;
+
+
+START TRANSACTION;
+
+UPDATE Account
+SET balance = balance - 1000
+WHERE account_no = 10001;
+
 SAVEPOINT s1;
-UPDATE Account SET balance = balance + 1000 WHERE account_no = 10002;
-ROLLBACK TO s1;     -- undo only second update
-COMMIT;             -- first update is made durable (for demo of savepoint)
 
--- Isolation levels
-SET TRANSACTION ISOLATION LEVEL READ COMMITTED;   -- Oracle default
-SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-ROLLBACK;
+UPDATE Account
+SET balance = balance + 1000
+WHERE account_no = 10002;
 
--- Lock demo (open two sessions)
--- Session 1:  SELECT * FROM Account WHERE account_no=10001 FOR UPDATE;
--- Session 2:  UPDATE Account SET balance=balance+1 WHERE account_no=10001;  -- waits (row lock)
--- Session 1:  COMMIT;   -- session 2 proceeds
+ROLLBACK TO SAVEPOINT s1;
 
--- Deadlock demo (two sessions)
--- S1: UPDATE Account SET balance=balance WHERE account_no=10001;
--- S2: UPDATE Account SET balance=balance WHERE account_no=10002;
--- S1: UPDATE Account SET balance=balance WHERE account_no=10002;  -- waits
--- S2: UPDATE Account SET balance=balance WHERE account_no=10001;  -- ORA-00060 deadlock detected
+COMMIT;
 
--- Calls
-BEGIN transfer(10003, 10004, 5000); END;
-/
-BEGIN transfer(10004, 10003, 99999999); END;   -- fails: insufficient balance, rolled back
-/
+
+SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+START TRANSACTION;
+
+SELECT *
+FROM Account
+WHERE account_no = 10001;
+
+COMMIT;
+
+
+SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+START TRANSACTION;
+
+SELECT *
+FROM Account
+WHERE account_no = 10001;
+
+COMMIT;
+
+
+DROP PROCEDURE IF EXISTS transfer;
+
+DELIMITER //
+
+CREATE PROCEDURE transfer(
+    IN from_account INT,
+    IN to_account INT,
+    IN transfer_amount DECIMAL(15,2)
+)
+BEGIN
+    DECLARE sender_balance DECIMAL(15,2);
+
+    START TRANSACTION;
+
+    SELECT balance
+    INTO sender_balance
+    FROM Account
+    WHERE account_no = from_account
+    FOR UPDATE;
+
+    IF sender_balance IS NULL THEN
+
+        ROLLBACK;
+
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Sender account not found';
+
+    ELSEIF sender_balance < transfer_amount THEN
+
+        ROLLBACK;
+
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Insufficient balance';
+
+    ELSE
+
+        UPDATE Account
+        SET balance = balance - transfer_amount
+        WHERE account_no = from_account;
+
+        UPDATE Account
+        SET balance = balance + transfer_amount
+        WHERE account_no = to_account;
+
+        COMMIT;
+
+    END IF;
+
+END //
+
+DELIMITER ;
+
+
+
+CALL transfer(10003, 10004, 5000);
+
+
+CALL transfer(10004, 10003, 99999999);
