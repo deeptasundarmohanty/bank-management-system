@@ -1,17 +1,10 @@
-# ============================================================
-# MySQL Backup and Recovery
-# Lab Exp 4 | Unit 5
-# ============================================================
+#!/bin/bash
+# Backup and restore for MySQL (Lab Exp 4 backup, Unit 5 recovery)
+# Usage: bash 07_backup.sh
+USER=root
+STAMP=$(date +%F_%H-%M)
+mkdir -p backups
 
-# ------------------------------------------------------------
-# A. Backup the banking_db database
-# ------------------------------------------------------------
-
-mysqldump -u root -p banking_db > banking_db_backup.sql
-
-
-# ------------------------------------------------------------
-# B. Restore the banking_db database
-# ------------------------------------------------------------
-
-mysql -u root -p banking_db < banking_db_backup.sql
+# Backup one database, including triggers, routines and events
+mysqldump -u $USER -p 
+mysqldump -u $USER -p 
