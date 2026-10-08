@@ -1,63 +1,53 @@
-"""
-Bank Management System - Python backend (CLI)
-Requires: pip install oracledb
-Edit DSN / USER / PASSWORD below. Business logic lives in the PL/SQL
-procedures (05_plsql.sql) and triggers (02_triggers.sql).
-"""
-import oracledb
+import mysql.connector
 
-USER, PASSWORD, DSN = "bankuser", "password", "localhost/XEPDB1"
+CONFIG = dict(host="localhost", user="root", password="password", database="bank_db")
 
 
 def connect():
-    return oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    return mysql.connector.connect(**CONFIG)
 
 
 def add_customer(con, name, dob, phone, email, address):
     cur = con.cursor()
-    cid = cur.var(int)
-    cur.execute(
-        """INSERT INTO Customer VALUES (seq_customer.NEXTVAL, :n, TO_DATE(:d,'YYYY-MM-DD'),
-           :p, :e, :a) RETURNING customer_id INTO :cid""",
-        n=name, d=dob, p=phone, e=email, a=address, cid=cid)
+    cur.execute("INSERT INTO Customer (name, dob, phone, email, address) VALUES (%s,%s,%s,%s,%s)",
+                (name, dob, phone, email, address))
     con.commit()
-    return cid.getvalue()[0]
+    return cur.lastrowid
 
 
 def open_account(con, customer_id, branch_id, acc_type):
     cur = con.cursor()
-    acc = cur.var(int)
-    cur.execute(
-        """INSERT INTO Account(account_no,customer_id,branch_id,acc_type)
-           VALUES (seq_account.NEXTVAL,:c,:b,:t) RETURNING account_no INTO :a""",
-        c=customer_id, b=branch_id, t=acc_type, a=acc)
+    cur.execute("INSERT INTO Account (customer_id, branch_id, acc_type) VALUES (%s,%s,%s)",
+                (customer_id, branch_id, acc_type))
     con.commit()
-    return acc.getvalue()[0]
+    return cur.lastrowid
 
 
 def balance(con, acc):
     cur = con.cursor()
-    cur.execute("SELECT balance FROM Account WHERE account_no=:a", a=acc)
+    cur.execute("SELECT balance FROM Account WHERE account_no=%s", (acc,))
     row = cur.fetchone()
     return row[0] if row else None
 
 
 def statement(con, acc, limit=10):
     cur = con.cursor()
-    cur.execute("""SELECT txn_id, txn_type, amount, TO_CHAR(txn_date,'DD-MON-YY'), description
-                   FROM Bank_Transaction WHERE account_no=:a
-                   ORDER BY txn_date DESC, txn_id DESC FETCH FIRST :n ROWS ONLY""", a=acc, n=limit)
+    cur.execute("""SELECT txn_id, txn_type, amount, DATE_FORMAT(txn_date,'%d-%b-%y'), description
+                   FROM Bank_Transaction WHERE account_no=%s
+                   ORDER BY txn_date DESC, txn_id DESC LIMIT %s""", (acc, limit))
     return cur.fetchall()
 
 
 def call(con, proc, *args):
-    """Run a stored procedure; DB errors (e.g. insufficient balance) are returned as text."""
+    """Run a stored procedure; database errors (e.g. insufficient balance) come back as text."""
     try:
-        con.cursor().callproc(proc, list(args))
+        cur = con.cursor()
+        cur.callproc(proc, args)
+        con.commit()
         return "OK"
-    except oracledb.DatabaseError as e:
+    except mysql.connector.Error as e:
         con.rollback()
-        return str(e).split("\n")[0]
+        return e.msg
 
 
 def loan_report(con):
